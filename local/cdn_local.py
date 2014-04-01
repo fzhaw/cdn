@@ -26,7 +26,7 @@ import swiftclient
 from swiftclient.exceptions import ClientException
 
 from local.local_db import StorageObject, User as StorageUser
-import sys
+import sys, os
 from requests import get
 from threading import Thread
 from socket import gethostname
@@ -47,7 +47,9 @@ local_port = config.get('server', 'port')
 local_address = 'http://' + gethostname() + ":" + str(local_port)
 
 # Keystone access details
-auth_url = config.get('keystone', 'auth_url')
+#auth_url is provided by environment variable in the auto provisioned implementation.
+# auth_url = config.get('keystone', 'auth_url')
+auth_url = os.getenv('AUTH_URL') + '/v2.0'
 auth_version = config.get('keystone', 'auth_version')
 # auth_url = 'http://192.168.56.10:5000/v2.0'
 # auth_version = '2'
@@ -61,12 +63,13 @@ auth_admintenant = config.get('keystone', 'auth_admintenant')
 # auth_admintenant = 'admin'
 
 # Swift root
-swift_root = config.get('swift', 'root')
+#swift_root is provided by environment variable in the auto provisioned implementation.
+# swift_root = config.get('swift', 'root')
+swift_root = os.getenv('SWIFT_URL') + '/v1/AUTH_'
 # swift_root = 'http://192.168.56.10:8080/v1/AUTH_'
 
-# Predefined global CDN directory address, should come from config file later
-cdn_central_address = config.get('centralCDN', 'url')
-# cdn_central_address = 'http://localhost:8182'
+# global CDN directory address, should come from config file later
+cdn_central_address = None
 
 # Path where objects are locally stored before being stored to the object service when caching
 store_path = config.get('temporaryStorage', 'path')
@@ -243,7 +246,7 @@ def get_object(global_id, container_name, object_name):
         # let's try to retrieve it... if it exists
         # Before checking anything, verify that user global_id exists!
         usr = StorageUser.objects(global_id=global_id).first()
-        if usr is not None:
+        if usr is not None and cdn_central_address is not None:
             # find origin for user from central
             # TODO: this value should definitely be cached or even set at account creation time
             r = get(cdn_central_address + '/origin/' + global_id)
@@ -261,7 +264,7 @@ def get_object(global_id, container_name, object_name):
 
             return redirect("%s/cdn/%s/%s/%s" % (origin_address, global_id, container_name, object_name), 303)
         else:
-            return abort(404, 'User does not exist')
+            return abort(404, 'User does not exist or Central CDN server undefined')
 
 
 def cache_object(origin_address, user, container_name, object_name):
@@ -365,5 +368,25 @@ def post_object(global_id, container):
             abort(400, "Request malformed, probably object is not sent with the file_content identifier")
     else:
         abort(401, 'Unknown user')
+
+@route('/register', method='POST')
+def post_central_server():
+    """
+    Registers the central server so local pop knows where to look for objects
+    Content-Type: application/json
+    Requires JSON string body containing central server url such as '{"url":"http://central.mcn.org:8182"}'
+    """
+    # This is currently unused
+    # TODO: Add authentication for admin
+    # username = request.headers.get('X-Username')
+    # password = request.headers.get('X-Password')
+
+    jreq = request.json
+    if jreq is not None:
+        url = jreq.get('url')
+        if url is not None:
+            # TODO: Clean this
+            global cdn_central_address
+            cdn_central_address = url
 
 run(host='0.0.0.0', port=local_port, debug=True)

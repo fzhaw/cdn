@@ -57,7 +57,7 @@ auth_version = config.get('keystone', 'auth_version')
 #Admin connection details
 auth_admin = config.get('keystone', 'auth_admin')
 # auth_adminpass = config.get('keystone', 'auth_adminpassword')
-auth_adminpass = os.getenv('AUTH_PASS') + '/v2.0'
+auth_adminpass = os.getenv('AUTH_PASS')
 
 auth_admintenant = config.get('keystone', 'auth_admintenant')
 # auth_admin = 'admin'

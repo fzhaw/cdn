@@ -56,7 +56,9 @@ auth_version = config.get('keystone', 'auth_version')
 
 #Admin connection details
 auth_admin = config.get('keystone', 'auth_admin')
-auth_adminpass = config.get('keystone', 'auth_adminpassword')
+# auth_adminpass = config.get('keystone', 'auth_adminpassword')
+auth_adminpass = os.getenv('AUTH_PASS') + '/v2.0'
+
 auth_admintenant = config.get('keystone', 'auth_admintenant')
 # auth_admin = 'admin'
 # auth_adminpass = 'admin'
@@ -105,7 +107,7 @@ def post_account():
             user = StorageUser.objects(global_id=global_id).first()
             if user is None:
                 # Create tenant
-                tenant_id = admin_ks_conn.tenants.create(tenant_name=global_id).id
+                tenant_id = admin_ks_conn.tenants.create(tenant_name=global_id).id #Possibility of failure here if same name already registered
                 # Create user
                 user_id = admin_ks_conn.users.create(name=global_id, password=password, tenant_id=tenant_id)
                 # Set admin role in tenant

@@ -1,0 +1,229 @@
+heat_template_version: 2013-05-23 
+description: "CDN template - Includes everything for easy testing"
+
+parameters: 
+  instance_type: 
+    default: m1.small
+    description: "Type of instance (flavor) to be used"
+    label: "Instance Type"
+    type: string
+  key_name: 
+    description: "Name of key-pair to be used for compute instance"
+    label: "Key Name"
+    type: string
+  swift_admin_password:
+    description: "Admin password"
+    label: "Admin password"
+    type: string
+    default: admin_cdn
+
+resources: 
+  swift: 
+    type: "OS::Nova::Server"
+    properties: 
+      flavor: m1.medium
+      image: swift_aio
+      key_name: 
+        get_param: key_name
+      security_groups: 
+      - {get_resource: swift_security_group}
+      user_data: 
+        str_replace: 
+          template: |
+              #!/bin/bash
+              su -c /home/ubuntu/init.sh ubuntu
+              rc=$?
+              if [[ $rc != 0 ]] ; then
+                 exit $rc
+              fi
+              curl -X PUT -H 'Content-Type:application/json' \
+                   -d '{"Status" : "SUCCESS","Reason" : "Configuration OK","UniqueId" : "SWIFT1","Data" : "Swift Configured."}' \
+                   "$wait_handle$"
+          params: 
+            $wait_handle$: 
+              get_resource: swift_wait_handle
+  
+  swift_security_group:
+    type: "AWS::EC2::SecurityGroup"
+    properties:
+      GroupDescription: "Swift public ports"
+      SecurityGroupIngress: 
+      - {"CidrIp": 0.0.0.0/0, "FromPort": "22", "ToPort": "22", "IpProtocol": "tcp"}
+      - {"CidrIp": 0.0.0.0/0, "FromPort": "5000", "ToPort": "5000", "IpProtocol": "tcp"}
+      - {"CidrIp": 0.0.0.0/0, "FromPort": "35357", "ToPort": "35357", "IpProtocol": "tcp"}
+      - {"CidrIp": 0.0.0.0/0, "FromPort": "8080", "ToPort": "8080", "IpProtocol": "tcp"}
+        
+
+  swift_floating: 
+    type: "AWS::EC2::EIP"
+
+  swift_floating_association: 
+    type: "AWS::EC2::EIPAssociation"
+    properties: 
+      EIP: 
+        Ref: swift_floating
+      InstanceId: 
+        Ref: swift
+
+  swift_wait: 
+    type: "AWS::CloudFormation::WaitCondition"
+    depends_on: swift
+    properties: 
+      Handle: 
+        get_resource: swift_wait_handle
+      Timeout: 1000
+
+  swift_wait_handle: 
+    type: "AWS::CloudFormation::WaitConditionHandle"
+
+  cdnlocal: 
+    type: "OS::Nova::Server"
+    depends_on: swift_wait
+    properties: 
+      flavor: 
+        get_param: instance_type
+      image: ubuntu_cloud_13.04
+      key_name: 
+        get_param: key_name
+      security_groups: 
+      - {get_resource: cdnlocal_security_group}
+      user_data: 
+        str_replace: 
+          template: |
+              #!/bin/bash
+              apt-get -y install mongodb git python-pip build-essential python-dev
+              pip install python-keystoneclient 
+              pip install -U simplejson
+              pip install python-swiftclient
+              pip install bottle
+              pip install mongoengine
+              cd ~
+              git clone https://github.com/fzhaw/cdn.git
+              cd cdn
+              git checkout tags/release
+              export PYTHONPATH=$PYTHONPATH:~/cdn
+              export AUTH_URL=http://$swiftip$:5000
+              export AUTH_PASS=$auth_pass$
+              export SWIFT_URL=http://$swiftip$:8080
+              echo "Config Done" >/tmp/status
+              python local/cdn_local.py &
+              curl -X PUT -H 'Content-Type:application/json' \
+                -d '{"Status" : "SUCCESS","Reason" : "Configuration OK","UniqueId" : "CDN_Local","Data" : "CDN Local Configured."}' \
+                "$cdnwait_handle$"
+          params: 
+            $data$: 
+              get_attr: 
+                - swift_wait
+                - Data
+            $swiftip$: 
+              Ref: swift_floating
+            $cdnwait_handle$: 
+              get_resource: cdnlocal_wait_handle
+            $auth_pass$:
+              get_param: swift_admin_password
+
+  cdnlocal_security_group:
+    type: "AWS::EC2::SecurityGroup"
+    properties:
+      GroupDescription: "CDN Local public ports"
+      SecurityGroupIngress: 
+      - {"CidrIp": 0.0.0.0/0, "FromPort": "22", "ToPort": "22", "IpProtocol": "tcp"}
+      - {"CidrIp": 0.0.0.0/0, "FromPort": "8181", "ToPort": "8181", "IpProtocol": "tcp"}
+          
+
+  cdnlocal_floating: 
+    type: "AWS::EC2::EIP"
+
+  cdnlocal_floating_association: 
+    type: "AWS::EC2::EIPAssociation"
+    properties: 
+      EIP: 
+        Ref: cdnlocal_floating
+      InstanceId: 
+        Ref: cdnlocal
+        
+  cdnlocal_wait: 
+    type: "AWS::CloudFormation::WaitCondition"
+    depends_on: cdnlocal
+    properties: 
+      Handle: 
+        get_resource: cdnlocal_wait_handle
+      Timeout: 1000
+
+  cdnlocal_wait_handle: 
+    type: "AWS::CloudFormation::WaitConditionHandle"
+
+  cdncentral:
+    type: "OS::Nova::Server"
+    depends_on: cdnlocal_wait
+    properties:
+      flavor: m1.medium
+      image: ubuntu_cdn_ready
+      key_name: 
+        get_param: key_name
+      security_groups: 
+      - {get_resource: cdncentral_security_group}
+      user_data: 
+        str_replace: 
+          template: |
+              #!/bin/bash
+              cd ~
+              git clone https://github.com/fzhaw/cdn.git
+              cd cdn
+              git checkout tags/release
+              export PYTHONPATH=$PYTHONPATH:~/cdn
+              echo "Config Done" >/tmp/status
+              mkdir /data
+              mkdir /data/db
+              service mongodb restart
+              sleep 20
+              python central/cdn_central.py &
+              curl -X PUT -H 'Content-Type:application/json' \
+                -d '{"Status" : "SUCCESS","Reason" : "Configuration OK","UniqueId" : "CDN_Central","Data" : "CDN Central Configured."}' \
+                "$cdnwait_handle$"
+          params: 
+            $data$: 
+              get_attr: 
+                - cdnlocal_wait
+                - Data
+            $cdnwait_handle$: 
+              get_resource: cdncentral_wait_handle
+              
+  cdncentral_floating: 
+    type: "AWS::EC2::EIP"
+
+  cdncentral_floating_association: 
+    type: "AWS::EC2::EIPAssociation"
+    properties: 
+      EIP: 
+        Ref: cdncentral_floating
+      InstanceId: 
+        Ref: cdncentral
+        
+  cdncentral_wait: 
+    type: "AWS::CloudFormation::WaitCondition"
+    depends_on: cdncentral
+    properties: 
+      Handle: 
+        get_resource: cdncentral_wait_handle
+      Timeout: 1000
+
+  cdncentral_wait_handle: 
+    type: "AWS::CloudFormation::WaitConditionHandle"
+    
+  cdncentral_security_group:
+    type: "AWS::EC2::SecurityGroup"
+    properties:
+      GroupDescription: "CDN Central public ports"
+      SecurityGroupIngress: 
+      - {"CidrIp": 0.0.0.0/0, "FromPort": "22", "ToPort": "22", "IpProtocol": "tcp"}
+      - {"CidrIp": 0.0.0.0/0, "FromPort": "8182", "ToPort": "8182", "IpProtocol": "tcp"}
+          
+
+outputs: 
+  cdnlocal_ip: 
+    description: "IP PoP CDN Local"
+    value: { Ref: cdnlocal_floating }
+  cdncentral_ip:
+    description: "IP CDN Central"
+    value: { Ref: cdncentral_floating }

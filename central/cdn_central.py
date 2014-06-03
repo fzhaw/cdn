@@ -160,6 +160,15 @@ def post_pop():
         traceback.print_exc(sys.stdout)
         abort(500)
 
+@route('/pop', method='GET')
+def get_pops():
+    """
+    Retrieves list of currently registered PoPs
+    """
+    pops = [{'address':pop.address, 'location':pop.location} for pop in PoP.objects]
+    response.content_type = 'application/json'
+    return json.dumps(pops)
+
 
 @route('/origin/:global_id', method='GET')
 def get_origin(global_id):

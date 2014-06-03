@@ -23,6 +23,7 @@ class PoP(Document):
     address = StringField(required=True)
     admin_username = StringField(default="admin")
     admin_password = StringField(default="admin")
+    location = StringField(default="unknown")
 
 
 class User(Document):
@@ -30,7 +31,7 @@ class User(Document):
     global_id = StringField(required=True)
     global_pwd = StringField(required=True)
     #Origin Point of Presence
-    origin_pop = ReferenceField('PoP', reverse_delete_rule=mongoengine.DENY)
+    origin_pop = ReferenceField('PoP', reverse_delete_rule=DENY)
 
     # Property fields to retrieve PoP entry faster
     @property

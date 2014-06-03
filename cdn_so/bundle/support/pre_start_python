@@ -1,0 +1,7 @@
+#!/bin/bash
+
+echo "Setting environment variable"
+
+export DESIGN_URI='http://160.85.4.224:5000/v2.0'
+
+

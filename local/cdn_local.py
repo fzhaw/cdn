@@ -25,7 +25,7 @@ from simplejson.scanner import JSONDecodeError
 import swiftclient
 from swiftclient.exceptions import ClientException
 
-from local.local_db import StorageObject, User as StorageUser
+from local.local_db import StorageObject, User as StorageUser, Origin as StorageOrigin
 import sys, os
 from requests import get
 from threading import Thread
@@ -249,17 +249,20 @@ def get_object(global_id, container_name, object_name):
         # Before checking anything, verify that user global_id exists!
         usr = StorageUser.objects(global_id=global_id).first()
         if usr is not None and cdn_central_address is not None:
-            # find origin for user from central
-            # TODO: this value should definitely be cached or even set at account creation time
-            r = get(cdn_central_address + '/origin/' + global_id)
-            jresp = r.json()
-            origin_address = jresp['origin_address']
+            # find origin for user from central or from the cache
+            origin_object = StorageOrigin.objects(user=usr).first()
+            origin_address = None
+            if origin_object is not None:
+                origin_address = origin_object.url
+            else:
+                r = get(cdn_central_address + '/origin/' + global_id)
+                jresp = r.json()
+                origin_address = jresp['origin_address']
 
             # If current instance of cdnlocal IS the origin, then file does not exist, returns a 404
-            if origin_address == local_address:
+            if origin_address == local_address or origin_address is None:
                 return abort(404, 'File does not exist or is unavailable')
 
-#TODO: Now test cache
             # Cache object, but should redirect to origin this time so user does not wait for file retrieval
             t = Thread(target=cache_object, args=(origin_address, usr, container_name, object_name))
             t.start()
@@ -359,7 +362,7 @@ def post_object(global_id, container):
 
             # Save to Mongo
             obj = StorageObject(tenant_id=tenant_id, tenant_name=global_id, container_name=container,
-                                object_name=fil.filename)
+                                object_name=fil.filename, user=user)
             obj.save()
 
             return HTTPResponse(status=201)

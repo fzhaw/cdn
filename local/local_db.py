@@ -24,6 +24,7 @@ class User(Document):
     global_pwd = StringField(required=True)
     #real tenant id corresponding to the id of the tenant which name is global_id
     tenant_id = StringField()
+    #origin = ReferenceField(Origin, reverse_delete_rule=NULLIFY)
 
 
 class StorageObject(Document):
@@ -33,4 +34,12 @@ class StorageObject(Document):
     object_name = StringField()
     user = ReferenceField(User, reverse_delete_rule=CASCADE)
 
-
+class Origin(Document):
+    url = StringField()
+    user = ReferenceField(User, reverse_delete_rule=CASCADE)
+    created = DateTimeField(default=datetime.now)
+    meta = {
+        'indexes': [
+            {'fields': ['created'], 'expireAfterSeconds': 3600}
+        ]
+    }

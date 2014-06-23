@@ -28,7 +28,7 @@ import sys
 def post_account():
     """
     Creates an account on each PoP, selects one PoP to be the origin
-    Requires body in the request: {"global_password":"yyyy"}
+    Requires body in the request: {"global_password":"yyyy", "dns_url":"dns.management.endpoint", "dns_token":"tokendata"}
     global_id is generated
     Other informations may be needed to infer closest PoP
     TODO: Check with DNS
@@ -39,6 +39,7 @@ def post_account():
         jreq = request.json
         global_id = str(uuid4())
         password = jreq.get('global_password')
+
 
         if password is not None:
             # User exists?
@@ -51,9 +52,6 @@ def post_account():
                 # Save user to Mongo
                 new_user = User(global_id=global_id, global_pwd=password, origin_pop=pop)
                 new_user.save()
-
-                # Create local accounts
-                create_accounts(global_id, password)
 
                 body = {'global_id': global_id, 'origin': pop.address}
                 response.set_header('Content-Type', 'application/json')
@@ -70,22 +68,80 @@ def post_account():
     #     abort(500, ex.message)
 
 
-def create_accounts(global_id, global_password):
+@route('/account/:global_id', method='GET')
+def retrieve_configuration(global_id):
     """
-    Internal method used to create accounts on all local PoPs on behalf of a user
+    JSON format: {'global_password':'password'}
+    """
+    try:
+        jreq = request.json
+        password = jreq.get('global_password')
+
+        if password is not None:
+            user = User.objects(global_id=global_id).first()
+            if user is None:
+                #For now sends list of pops back
+                body = {'pops': user.pops}
+                response.set_header('Content-Type', 'application/json')
+                return json.dumps(body)
+                #TODO: test case
+            else:
+                abort(409, 'Authentication invalid')
+        else:
+            abort(400, 'JSON incomplete')
+
+    except JSONDecodeError:
+        abort(400, 'JSON received invalid')
+
+@route('/account/:global_id', method='POST')
+def update_configuration(global_id):
+    """
+    JSON format: {'pops':['pop1.swift1.zhaw.ch', 'pop2.swift2.cloudsigma.ch'], 'global_password':'password'}
+    """
+    try:
+        jreq = request.json
+        password = jreq.get('global_password')
+        pops_urls = jreq.get('pops')
+
+        if password is not None:
+            # User exists?
+            user = User.objects(global_id=global_id).first()
+            if user is None:
+                #Loop over pops checking existence on the DB
+                for pop_url in pops_urls:
+                    if PoP.objects(address=pop_url).first() is None:
+                        abort('204', 'PoP ' + pop_url + ' does not exist.')
+                user.pops = pops_urls
+                user.save()
+                update_local_accounts(user)
+                return HTTPResponse(status=200)
+                #TODO: test case
+            else:
+                abort(409, 'Authentication invalid')
+        else:
+            abort(400, 'JSON incomplete')
+    except JSONDecodeError:
+        abort(400, 'JSON received invalid')
+
+
+
+def update_local_accounts(user):
+    """
+    Internal method used to create accounts on all user-specified PoPs on behalf of a user
     :param global_id: new user's id
     :param global_password: new user's password
     """
 
     # Add authenticate X-Username and X-Password here when they will be supported local server-side
 
-    payload = {'global_id': global_id, 'global_password': global_password}
+    payload = {'global_id': user.global_id, 'global_password': user.global_pwd}
     headers = {'Content-Type': 'application/json'}
 
     # Only few PoPs at the moment, so sending the post requests from the main thread here
     # TODO: Thread the account creation requests is probably better
 
-    for pop in PoP.objects:
+    for pop_url in user.pops:
+        pop = PoP.objects(address=pop_url).first()
         r = post(pop.address + '/account', data=json.dumps(payload), headers=headers)
         if r.status_code != 201:
             raise Exception("Error while creating account on " + pop.address + ". Error message is " + r.text)
@@ -108,7 +164,7 @@ def delete_account():
         if global_id is not None and password is not None:
             user = User.objects(global_id=global_id, global_pwd=password).first()
             if user is not None:
-                delete_local_accounts(global_id, password)
+                delete_local_accounts(user)
                 user.delete()
 
                 return HTTPResponse(status=204)
@@ -120,14 +176,15 @@ def delete_account():
         abort(400, 'JSON received invalid')
 
 
-def delete_local_accounts(global_id, global_password):
+def delete_local_accounts(user):
     """
     Internal method used to delete accounts on all local PoPs on behalf of a user
     :param global_id: user's id
     :param global_password: user's password
     """
-    payload = {'global_id': global_id, 'global_password': global_password}
-    for pop in PoP.objects:
+    payload = {'global_id': user.global_id, 'global_password': user.global_pwd}
+    for pop_url in user.pops:
+        pop = PoP.objects(address=pop_url)
         r = post(pop.address, json.dumps(payload))
 
 

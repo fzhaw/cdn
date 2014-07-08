@@ -14,47 +14,54 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 """
-from requests import post
+from requests import post, delete
 import json
-from bottle import route, run, request, abort, response, HTTPResponse
+from bottle import route, run, request, abort, response, HTTPResponse, Bottle, debug
 from central_db import *
 from uuid import uuid4
 from simplejson.scanner import JSONDecodeError
 import traceback
 import sys
+from central.DNSClient import DNSClient
+
+app = Bottle()
 
 
-@route('/account', method='POST')
+@app.route('/account', method='POST')
 def post_account():
     """
     Creates an account on each PoP, selects one PoP to be the origin
     Requires body in the request: {"global_password":"yyyy", "dns_url":"dns.management.endpoint", "dns_token":"tokendata"}
-    global_id is generated
+    global_id is generated, domain_name is created for this user
     Other informations may be needed to infer closest PoP
     TODO: Check with DNS
 
-    :return: HTTP 201 if created, with json body {"global_id":"hduakdhwakdiwad", "origin":"http://example.mcn.org:8181/cdn"}
+    :return: HTTP 201 if created, with json body {"global_id":"hduakdhwakdiwad",
+    "domain_name":"uuid.cdn.mobile-cloud-networking.eu"}
     """
     try:
         jreq = request.json
         global_id = str(uuid4())
         password = jreq.get('global_password')
-
+        dns_url = jreq.get('dns_url')
+        dns_token = jreq.get('dns_token')
 
         if password is not None:
             # User exists?
             user = User.objects(global_id=global_id).first()
             if user is None:
-                # TODO: Retrieve closest PoP
                 # for now, takes the first from the PoP list
                 pop = PoP.objects().first()
-
+                # generate domain name
+                domain_name = global_id + '.cdn.mobile-cloud-networking.eu'
                 # Save user to Mongo
-                new_user = User(global_id=global_id, global_pwd=password, origin_pop=pop)
+                new_user = User(global_id=global_id, global_pwd=password, dns_url=dns_url,
+                                dns_token=dns_token, domain_name=domain_name)
                 new_user.save()
 
-                body = {'global_id': global_id, 'origin': pop.address}
+                body = {'global_id': global_id, 'origin': pop.address, 'domain': domain_name}
                 response.set_header('Content-Type', 'application/json')
+                response.status = 201
                 return json.dumps(body)
                 # return HTTPResponse(status=201)
             else:
@@ -64,11 +71,11 @@ def post_account():
             abort(400, 'JSON incomplete')
     except JSONDecodeError:
         abort(400, 'JSON received invalid')
-    # except Exception, ex:
-    #     abort(500, ex.message)
+        # except Exception, ex:
+        #     abort(500, ex.message)
 
 
-@route('/account/:global_id', method='GET')
+@app.route('/account/:global_id', method='GET')
 def retrieve_configuration(global_id):
     """
     JSON format: {'global_password':'password'}
@@ -78,8 +85,8 @@ def retrieve_configuration(global_id):
         password = jreq.get('global_password')
 
         if password is not None:
-            user = User.objects(global_id=global_id).first()
-            if user is None:
+            user = User.objects(global_id=global_id, global_pwd=password).first()
+            if user is not None:
                 #For now sends list of pops back
                 body = {'pops': user.pops}
                 response.set_header('Content-Type', 'application/json')
@@ -93,10 +100,13 @@ def retrieve_configuration(global_id):
     except JSONDecodeError:
         abort(400, 'JSON received invalid')
 
-@route('/account/:global_id', method='POST')
+
+@app.route('/account/:global_id', method='POST')
 def update_configuration(global_id):
     """
     JSON format: {'pops':['pop1.swift1.zhaw.ch', 'pop2.swift2.cloudsigma.ch'], 'global_password':'password'}
+    Chooses random Origin PoP from this list
+    returns: {"origin":"192.168.10.10"}
     """
     try:
         jreq = request.json
@@ -105,24 +115,29 @@ def update_configuration(global_id):
 
         if password is not None:
             # User exists?
-            user = User.objects(global_id=global_id).first()
-            if user is None:
+            user = User.objects(global_id=global_id, global_pwd=password).first()
+            if user is not None:
                 #Loop over pops checking existence on the DB
                 for pop_url in pops_urls:
                     if PoP.objects(address=pop_url).first() is None:
                         abort('204', 'PoP ' + pop_url + ' does not exist.')
+                # chooses first pop as origin
+                user_origin_pop = PoP.objects(address=pops_urls[0]).first()
+                print user_origin_pop.address
+                user.origin_pop = user_origin_pop
                 user.pops = pops_urls
                 user.save()
-                update_local_accounts(user)
-                return HTTPResponse(status=200)
-                #TODO: test case
+                local_update = update_local_accounts(user)
+                if local_update:
+                    return HTTPResponse(status=200, body={'origin': user_origin_pop.address})
+                else:
+                    return HTTPResponse(status=200, body={'error': 'could not update local accounts'})
             else:
-                abort(409, 'Authentication invalid')
+                abort(409, 'Authentication invalid for user: ' + global_id)
         else:
             abort(400, 'JSON incomplete')
     except JSONDecodeError:
         abort(400, 'JSON received invalid')
-
 
 
 def update_local_accounts(user):
@@ -137,19 +152,28 @@ def update_local_accounts(user):
     payload = {'global_id': user.global_id, 'global_password': user.global_pwd}
     headers = {'Content-Type': 'application/json'}
 
-    # Only few PoPs at the moment, so sending the post requests from the main thread here
-    # TODO: Thread the account creation requests is probably better
-
+    # sending account creation requests to all selected pops
     for pop_url in user.pops:
         pop = PoP.objects(address=pop_url).first()
-        r = post(pop.address + '/account', data=json.dumps(payload), headers=headers)
-        if r.status_code != 201:
+        r = post('http://' + pop.address + '/account', data=json.dumps(payload), headers=headers)
+        if r.status_code != 201 and r.status_code != 409:
             raise Exception("Error while creating account on " + pop.address + ". Error message is " + r.text)
 
-    #TODO: Answer something and add account creation to general log
+    # deleting account from previous pops
+    user_pops = user.pops
+    for pop in PoP.objects(address__nin=user_pops):
+        # delete account
+        r = delete('http://' + pop.address + '/account', data=json.dumps(payload), headers=headers)
+        if r.status_code != 204:
+            raise Exception("Error while deleting account on " + pop.address + ". Error message is " + r.text)
+
+    # update the DNS records
+    dns_client = DNSClient(user)
+    updated = dns_client.updateUserRecords()
+    return updated
 
 
-@route('/account', method='DELETE')
+@app.route('/account', method='DELETE')
 def delete_account():
     """
     Deletes an account and all its objects on all PoPs
@@ -185,26 +209,30 @@ def delete_local_accounts(user):
     payload = {'global_id': user.global_id, 'global_password': user.global_pwd}
     for pop_url in user.pops:
         pop = PoP.objects(address=pop_url)
-        r = post(pop.address, json.dumps(payload))
+        r = delete('http://' + pop.address, json.dumps(payload))
 
 
-@route('/pop', method='POST')
+@app.route('/pop', method='POST')
 def post_pop():
     """
     Register a new PoP on the central server
     POST data must include a JSON body such as :
-    {"url":"http://example.mcn.org:8181", "admin_uname":"admin","admin_password":"password"}
+    {"url":"http://example.mcn.org:8181", "admin_uname":"admin","admin_password":"password","location":"FR"}
     """
     try:
         jreq = request.json
         pop_url = jreq.get('url')
         pop_admin_uname = jreq.get('admin_uname')
         pop_admin_password = jreq.get('admin_password')
+        pop_location = jreq.get('location')
         #Pop exists?
         pop = PoP.objects(address=pop_url).first()
         if pop is None:
             #Create
-            pop = PoP(address=pop_url, admin_username=pop_admin_uname, admin_password=pop_admin_password)
+            pop = PoP(address=pop_url,
+                      admin_username=pop_admin_uname,
+                      admin_password=pop_admin_password,
+                      location=pop_location)
             pop.save()
             return HTTPResponse(status=201)
         else:
@@ -217,17 +245,19 @@ def post_pop():
         traceback.print_exc(sys.stdout)
         abort(500)
 
-@route('/pop', method='GET')
+
+@app.route('/pop', method='GET')
+# @app.get('/pop')
 def get_pops():
     """
     Retrieves list of currently registered PoPs
     """
-    pops = [{'address':pop.address, 'location':pop.location} for pop in PoP.objects]
+    pops = [{'address': pop.address, 'location': pop.location} for pop in PoP.objects]
     response.content_type = 'application/json'
     return json.dumps(pops)
 
 
-@route('/origin/:global_id', method='GET')
+@app.route('/origin/:global_id', method='GET')
 def get_origin(global_id):
     # TODO: Add some authentication from the PoP, this data shouldn't be public
     """
@@ -245,4 +275,6 @@ def get_origin(global_id):
         abort(404, "No user found using the provided id")
 
 
-run(host='0.0.0.0', port=8182, debug=True)
+debug(True)
+if __name__ == '__main__':
+    run(app=app, host='0.0.0.0', port=8182, reloader=True, debug=True)

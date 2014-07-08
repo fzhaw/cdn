@@ -2,6 +2,7 @@ __author__ = 'florian'
 from central.central_db import User, PoP
 from nose.tools import assert_equals
 
+
 class testCentralDB(object):
     @classmethod
     def setUpClass(cls):

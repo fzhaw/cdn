@@ -34,6 +34,11 @@ class User(Document):
     origin_pop = ReferenceField('PoP', reverse_delete_rule=DENY)
     #pop will not be deleted automatically from the list of pops in case of deletion (deletion application managed)
     pops = ListField(StringField())
+    dns_url = StringField()
+    dns_token = StringField()
+    dns_id_domain = StringField()
+    # user domain name: [uid].cdn.mcn.eu
+    domain_name = StringField()
 
     # Property fields to retrieve PoP entry faster
     @property

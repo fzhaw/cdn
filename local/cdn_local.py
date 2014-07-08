@@ -167,7 +167,7 @@ def delete_account():
                 # Delete from Mongo
                 user.delete()
 
-                return HTTPResponse(status=200)
+                return HTTPResponse(status=204)
             else:
                 abort(409, 'User does not exist')
         else:
@@ -176,7 +176,7 @@ def delete_account():
         abort(400, 'JSON received invalid')
 
 
-@route('/cdn/:global_id/:container_name', method='DELETE')
+@route('/:global_id/:container_name', method='DELETE')
 def delete_container(global_id, container_name):
     """
     Deletes a container for specific tenant
@@ -204,7 +204,7 @@ def delete_container(global_id, container_name):
         abort(401, 'Unknown user')
 
 
-@route('/cdn/:global_id/:container_name', method='POST')
+@route('/:global_id/:container_name', method='POST')
 def create_container(global_id, container_name):
     """
     Creates a container for specific tenant
@@ -228,7 +228,7 @@ def create_container(global_id, container_name):
         abort(401, 'Unknown user')
 
 
-@route('/cdn/:global_id/:container_name/:object_name', method='GET')
+@route('/:global_id/:container_name/:object_name', method='GET')
 def get_object(global_id, container_name, object_name):
     """
     Redirects to an object already stored in Swift
@@ -267,7 +267,7 @@ def get_object(global_id, container_name, object_name):
             t = Thread(target=cache_object, args=(origin_address, usr, container_name, object_name))
             t.start()
 
-            return redirect("%s/cdn/%s/%s/%s" % (origin_address, global_id, container_name, object_name), 303)
+            return redirect("%s/%s/%s/%s" % (origin_address, global_id, container_name, object_name), 303)
         else:
             return abort(404, 'User does not exist or Central CDN server undefined')
 
@@ -283,7 +283,7 @@ def cache_object(origin_address, user, container_name, object_name):
     """
 
     # Download the object
-    r = get("%s/cdn/%s/%s/%s" % (origin_address, user.global_id, container_name, object_name), stream=True)
+    r = get("%s/%s/%s/%s" % (origin_address, user.global_id, container_name, object_name), stream=True)
     if r.status_code == 303:
         fname = store_path + "/" + user.global_id + "-" + object_name
         with open(fname, 'wb') as f:
@@ -306,7 +306,7 @@ def cache_object(origin_address, user, container_name, object_name):
         conn.put_object(container_name, object_name, open(fname))
 
 
-@route('/cdn/:global_id/:container/:object_name', method='DELETE')
+@route('/:global_id/:container/:object_name', method='DELETE')
 def delete_object(global_id, container, object_name):
     """
     Deletes an Object
@@ -341,7 +341,7 @@ def delete_object(global_id, container, object_name):
         abort(401, 'Unknown user')
 
 
-@route('/cdn/:global_id/:container/object', method='POST')
+@route('/:global_id/:container/object', method='POST')
 def post_object(global_id, container):
     """
     Uploads an Object, must include a file with id=file_content and a header X-Password=global_id user's password

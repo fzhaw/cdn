@@ -86,6 +86,9 @@ class ServiceOrchstratorExecution(object):
         """
         Report on state.
         """
+
+        #TODO: Send back credentials based on syntax used in e2e so
+
         if self.userid is not None:
             return 'Service is ready. Access credentials: '
         # Should contact CDN central for status, not implemented yet

@@ -14,8 +14,8 @@
    limitations under the License.
 """
 from mongoengine import *
-import datetime
-#
+from datetime import datetime
+
 connect('cdn_local')
 
 

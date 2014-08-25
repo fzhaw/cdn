@@ -27,7 +27,10 @@ if __name__ == '__main__':
     cdn_svc_type = Type('http://schemas.mobile-cloud-networking.eu/occi/sm#',
                   'cdn',
                   title='CDN Service',
-                  attributes={'mcn.endpoint.cdnpass':'mutable'},
+                  attributes={'mcn.cdnaas.endpoint': 'mutable',
+                              'mcn.cdnaas.userid': 'mutable',
+                              'mcn.cdnaas.password': 'mutable',
+                              },
                   related=[Resource.kind],
                   actions=[])
 

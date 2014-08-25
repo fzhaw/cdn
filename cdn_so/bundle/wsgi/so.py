@@ -90,7 +90,9 @@ class ServiceOrchstratorExecution(object):
         #TODO: Send back credentials based on syntax used in e2e so
 
         if self.userid is not None:
-            return 'Service is ready. Access credentials: '
+            creds = {'mcn.cdnaas.endpoint': self.endpoint, 'mcn.cdnaas.userid': self.userid, 'mcn.cdnaas.password': self.password}
+            return json.dumps(creds)
+            # return 'Service is ready. Access credentials: '
         # Should contact CDN central for status, not implemented yet
         pass
         # if self.stack_id is not None:

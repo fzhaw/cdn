@@ -34,5 +34,5 @@ class DNSClient():
             self.deleteUserDomain()
         self.createUserDomain()
         for pop_url in self.user.pops:
-            DNSaaSClient.createRecord(self.id_domain, {'name': 'www.'+self.user.global_id+'.cdn.mobile-cloud-networking.eu', 'type': 'A', 'data': pop_url})
+            DNSaaSClient.createRecord(self.user.dns_id_domain, {'name': 'www.'+self.user.global_id+'.cdn.mobile-cloud-networking.eu', 'type': 'A', 'data': pop_url})
         return True

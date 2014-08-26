@@ -155,7 +155,11 @@ def update_local_accounts(user):
     # sending account creation requests to all selected pops
     for pop_url in user.pops:
         pop = PoP.objects(address=pop_url).first()
-        r = post('http://' + pop.address + '/account', data=json.dumps(payload), headers=headers)
+        if str(pop.address).startswith('http://'):
+            post_address = pop.address + '/account'
+        else:
+            post_address = 'http://' + pop.address + '/account'
+        r = post(post_address, data=json.dumps(payload), headers=headers)
         if r.status_code != 201 and r.status_code != 409:
             raise Exception("Error while creating account on " + pop.address + ". Error message is " + r.text)
 

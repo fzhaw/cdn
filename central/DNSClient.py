@@ -23,11 +23,11 @@ class DNSClient():
         DNSaaSClient.token = self.user.dns_token
 
     def createUserDomain(self):
-        self.user.dns_id_domain = DNSaaSClient.createDomain(self.user.global_id, self.user.global_id + "@mcn", self.token)
+        self.user.dns_id_domain = DNSaaSClient.createDomain(self.user.global_id, self.user.global_id + "@mcn", self.user.dns_token)
         self.user.save()
 
     def deleteUserDomain(self):
-        DNSaaSClient.deleteDomain(self.user.dns_id_domain, self.token)
+        DNSaaSClient.deleteDomain(self.user.dns_id_domain, self.user.dns_token)
 
     def updateUserRecords(self):
         if self.user.dns_id_domain is not None:

@@ -71,7 +71,7 @@ swift_root = os.getenv('SWIFT_URL') + '/v1/AUTH_'
 # swift_root = 'http://192.168.56.10:8080/v1/AUTH_'
 
 # global CDN directory address, should come from config file later
-cdn_central_address = None
+cdn_central_address = os.getenv('CDN_CENTRAL')
 
 # Path where objects are locally stored before being stored to the object service when caching
 store_path = config.get('temporaryStorage', 'path')
@@ -266,7 +266,7 @@ def get_object(global_id, container_name, object_name):
             # Cache object, but should redirect to origin this time so user does not wait for file retrieval
             t = Thread(target=cache_object, args=(origin_address, usr, container_name, object_name))
             t.start()
-
+            print "redirect to: %s/%s/%s/%s" % (origin_address, global_id, container_name, object_name)
             return redirect("%s/%s/%s/%s" % (origin_address, global_id, container_name, object_name), 303)
         else:
             return abort(404, 'User does not exist or Central CDN server undefined')
@@ -283,13 +283,16 @@ def cache_object(origin_address, user, container_name, object_name):
     """
 
     # Download the object
+    if not origin_address.startswith('http://'):
+        origin_address = 'http://' + origin_address
     r = get("%s/%s/%s/%s" % (origin_address, user.global_id, container_name, object_name), stream=True)
     if r.status_code == 303:
+        print "storing"
         fname = store_path + "/" + user.global_id + "-" + object_name
         with open(fname, 'wb') as f:
             for chunk in r.iter_contents(1024):
                 f.write(chunk)
-
+        print "written"
         # Check if container exists if not create it
         conn = swiftclient.Connection(auth_url, user.global_id, user.global_pwd, auth_version=auth_version,
                                       tenant_name=user.global_id, insecure=True)
@@ -304,7 +307,11 @@ def cache_object(origin_address, user, container_name, object_name):
 
         # Add object
         conn.put_object(container_name, object_name, open(fname))
-
+         # Save to Mongo
+        obj = StorageObject(tenant_id=user.tenant_id, tenant_name=user.global_id, container_name=container,
+                                object_name=object_name, user=user)
+        obj.save()
+        print "saved"
 
 @route('/:global_id/:container/:object_name', method='DELETE')
 def delete_object(global_id, container, object_name):

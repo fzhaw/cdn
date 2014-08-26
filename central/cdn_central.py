@@ -127,8 +127,11 @@ def update_configuration(global_id):
                 user.origin_pop = user_origin_pop
                 user.pops = pops_urls
                 user.save()
+                #todo:improve safety
                 local_update = update_local_accounts(user)
                 if local_update:
+                    if not str(user_origin_pop.address).startswith('http://'):
+                        user_origin_pop.address = 'http://' + user_origin_pop.address
                     return HTTPResponse(status=200, body={'origin': user_origin_pop.address})
                 else:
                     return HTTPResponse(status=200, body={'error': 'could not update local accounts'})

@@ -264,7 +264,7 @@ def get_object(global_id, container_name, object_name):
                 return abort(404, 'File does not exist or is unavailable')
 
             # Cache object, but should redirect to origin this time so user does not wait for file retrieval
-            t = Thread(target=cache_object, args=(origin_address, usr, container_name, object_name))
+            t = Thread(target=cache_object, args=(origin_address, usr, container_name, object_name,))
             t.start()
             print "redirect to: %s/%s/%s/%s" % (origin_address, global_id, container_name, object_name)
             return redirect("%s/%s/%s/%s" % (origin_address, global_id, container_name, object_name), 303)
@@ -286,13 +286,11 @@ def cache_object(origin_address, user, container_name, object_name):
     if not origin_address.startswith('http://'):
         origin_address = 'http://' + origin_address
     r = get("%s/%s/%s/%s" % (origin_address, user.global_id, container_name, object_name), stream=True)
-    if r.status_code == 303:
-        print "storing"
+    if r.status_code == 200:
         fname = store_path + "/" + user.global_id + "-" + object_name
         with open(fname, 'wb') as f:
-            for chunk in r.iter_contents(1024):
+            for chunk in r.iter_content(1024):
                 f.write(chunk)
-        print "written"
         # Check if container exists if not create it
         conn = swiftclient.Connection(auth_url, user.global_id, user.global_pwd, auth_version=auth_version,
                                       tenant_name=user.global_id, insecure=True)
@@ -308,10 +306,9 @@ def cache_object(origin_address, user, container_name, object_name):
         # Add object
         conn.put_object(container_name, object_name, open(fname))
          # Save to Mongo
-        obj = StorageObject(tenant_id=user.tenant_id, tenant_name=user.global_id, container_name=container,
+        obj = StorageObject(tenant_id=user.tenant_id, tenant_name=user.global_id, container_name=container_name,
                                 object_name=object_name, user=user)
         obj.save()
-        print "saved"
 
 @route('/:global_id/:container/:object_name', method='DELETE')
 def delete_object(global_id, container, object_name):
